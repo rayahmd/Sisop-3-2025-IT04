@@ -166,7 +166,6 @@ int display_ur_dungeons(struct Hunter *cur_hunter, int *dungeon_i, int mode) {
     for (int i = 0; i < system_data->num_dungeons; i++) {
         struct Dungeon *d = &system_data->dungeons[i];
         if (d->min_level <= cur_hunter->level) {
-            // Safety check for d->name
             if (d->name[0] == '\0') {
                 printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
                        count + 1, "(Unnamed)", d->min_level, d->exp, d->atk, d->hp, d->def);
@@ -199,6 +198,10 @@ void battle(char *opponent_username) {
                 printf("Opponent is banned.\n");
                 return;
             }
+            int ur_total = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
+            int opp_total = opponent->atk + opponent->hp + opponent->def;
+            printf("Your stats: ATK=%d, HP=%d, DEF=%d, Total=%d\n", cur_hunter->atk, cur_hunter->hp, cur_hunter->def, ur_total);
+            printf("Opponent stats: ATK=%d, HP=%d, DEF=%d, Total=%d\n", opponent->atk, opponent->hp, opponent->def, opp_total);
             int my_stats = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
             int opp_stats = opponent->atk + opponent->hp + opponent->def;
             if (my_stats > opp_stats) {
@@ -266,9 +269,9 @@ void raid(){
     if (hunter_stats > dungeon_stats) {
         // kalo si hunter win
         cur_hunter->exp += dungeon->exp;
-        cur_hunter->atk += dungeon->atk / 2; // Hanya setengah ATK sebagai reward
-        cur_hunter->hp += dungeon->hp / 2;   // Hanya setengah HP sebagai reward
-        cur_hunter->def += dungeon->def / 2; // Hanya setengah DEF sebagai reward
+        cur_hunter->atk += dungeon->atk / 2; 
+        cur_hunter->hp += dungeon->hp / 2;   
+        cur_hunter->def += dungeon->def / 2; 
         int dungeon_shmid = shmget(dungeon->shm_key, sizeof(struct Dungeon), 0666);
         shmctl(dungeon_shmid, IPC_RMID, NULL);
 
@@ -277,7 +280,6 @@ void raid(){
         }
         system_data->num_dungeons--;
 
-        // Perbarui shared memory hunter
         int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
         struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
         *hunter_shm = *cur_hunter;
@@ -292,7 +294,7 @@ void raid(){
         printf("Raid failed! You took %d damage from %s. HP remaining: %d\n",
                damage, dungeon->name, cur_hunter->hp);
 
-        // perbarui shared memory hunter
+
         int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
         struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
         *hunter_shm = *cur_hunter;
