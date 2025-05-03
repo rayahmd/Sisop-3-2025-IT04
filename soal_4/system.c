@@ -72,7 +72,6 @@ void initialize_system() {
 }
 
 
-
 void display_hunters() {
     printf("Registered Hunters:\n");
     for (int i = 0; i < system_data->num_hunters; i++) {
@@ -162,34 +161,43 @@ int main() {
     srand(time(NULL));
     signal(SIGINT, cleanup);
     initialize_system();
-    char command[10], username[50];
+    int choice;
+    char username[50];
     while (1) {
-        printf("\nCommands: register, hunters, dungeon, dungeons, ban, unban, reset, exit\n");
-        scanf("%s", command);
-        if (strcmp(command, "register") == 0) {
-            printf("Enter username: ");
-            scanf("%s", username);
-            register_hunter(username);
-        } else if (strcmp(command, "hunters") == 0) {
+        printf("\n=== SYSTEM MENU ===\n");
+        printf("1. Hunter Info\n");
+        printf("2. Dungeon Info\n");
+        printf("3. Generate Dungeon\n");
+        printf("4. Ban Hunter\n");
+        printf("5. Unban Hunter\n");
+        printf("6. Reset Hunter\n");
+        printf("7. Exit\n");
+        printf("Choice: ");
+        scanf("%d", &choice);
+        getchar(); 
+        if (choice == 1) {
             display_hunters();
-        } else if (strcmp(command, "dungeon") == 0) {
-            create_dungeon();
-        } else if (strcmp(command, "dungeons") == 0) {
+        } else if (choice == 2) {
             display_dungeons();
-        } else if (strcmp(command, "ban") == 0) {
+        } else if (choice == 3) {
+            create_dungeon();
+        } else if (choice == 4) {
             printf("Enter username: ");
             scanf("%s", username);
             ban_hunter(username);
-        } else if (strcmp(command, "unban") == 0) {
+        } else if (choice == 5) {
             printf("Enter username: ");
             scanf("%s", username);
             unban_hunter(username);
-        } else if (strcmp(command, "reset") == 0) {
+        }    
+        else if (choice == 6) {
             printf("Enter username: ");
             scanf("%s", username);
             reset(username);
-        } else if (strcmp(command, "exit") == 0) {
+        } else if (choice == 7) {
             cleanup(0);
+        } else {
+            printf("Invalid choice.\n");
         }
     }
     shmdt(system_data);

@@ -72,6 +72,13 @@ void *notification_loop(void *arg) {
 }
 
 void register_hunter(char *username) {
+    FILE *fp = fopen("/tmp/hunter_system", "a");
+    if (fp == NULL) {
+        perror("fopen /tmp/hunter_system");
+        return;
+    }
+    fclose(fp);
+
     key_t key = get_system_key();
     shmid = shmget(key, sizeof(struct SystemData), 0666);
     if (shmid == -1) {
@@ -97,17 +104,31 @@ void register_hunter(char *username) {
     hunter->hp = 100;
     hunter->def = 5;
     hunter->banned = 0;
-    hunter->shm_key = ftok("/tmp", system_data->num_hunters + 'H');
+    hunter->shm_key = ftok("/tmp/hunter_system", 1000 + system_data->num_hunters);
+    if (hunter->shm_key == -1) {
+        perror("ftok");
+        shmdt(system_data);
+        return;
+    }
+
     int hunter_shmid = shmget(hunter->shm_key, sizeof(struct Hunter), IPC_CREAT | 0666);
     if (hunter_shmid == -1) {
         perror("shmget hunter");
         return;
     }
+
     struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+    if (hunter_shm == (void *)-1) {
+        perror("shmat hunter");
+        shmctl(hunter_shmid, IPC_RMID, NULL);
+        shmdt(system_data);
+        return;
+    }
     *hunter_shm = *hunter;
     shmdt(hunter_shm);
     system_data->num_hunters++;
     printf("Hunter %s registered.\n", username);
+    shmdt(system_data);
 }
 
 int login_hunter(char *username) {
@@ -128,7 +149,7 @@ int login_hunter(char *username) {
             }
             cur_hunter = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
             printf("Logged in as %s.\n", username);
-            return;
+            return 1;
         }
     }
     printf("Hunter %s not found.\n", username);
@@ -136,15 +157,28 @@ int login_hunter(char *username) {
     return 0;
 }
 
-void display_ur_dungeons() {
-    printf("Available Dungeons for Hunter %s level: %d\n", cur_hunter->username, cur_hunter->level);
+int display_ur_dungeons(int *dungeon_i, int mode) {
+    printf("=== Available Dungeons for Hunter %s level: %d ===\n", cur_hunter->username, cur_hunter->level);
+    printf("------------------------------------------------\n");
+    printf("| No | Name          | Min Lv | EXP  | ATK | HP  | DEF |\n");
+    printf("------------------------------------------------\n");
+    int count = 0;
     for (int i = 0; i < system_data->num_dungeons; i++) {
         struct Dungeon *d = &system_data->dungeons[i];
         if (d->min_level <= cur_hunter->level) {
             printf("Name: %s, Min Level: %d, EXP: %d, ATK: %d, HP: %d, DEF: %d\n",
                    d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
+                   dungeon_i[count] = i;
+                    count++; printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
+                        count, d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
+                 if (mode == 1) { 
+                     dungeon_i[count] = i;
+                 }
+                 count++;
         }
     }
+    printf("------------------------------------------------\n");
+    return count;
 }
 
 void battle(char *opponent_username) {
@@ -197,6 +231,87 @@ void battle(char *opponent_username) {
     printf("Opponent %s not found.\n", opponent_username);
 }
 
+void raid(){
+    if(cur_hunter->banned){
+        printf("You're still banned from raiding... \n");
+        return;
+    }
+    int dungeon_i[MAX_DUNGEONS];
+    int dungeon_count = display_ur_dungeons(dungeon_i, 1);
+    if(dungeon_count == 0){ printf("No dungeons available right now!"); return;}
+    
+    int choice;
+    printf("Enter dungeon number (0-%d): ", dungeon_count - 1);
+    scanf("%d", &choice);
+    getchar(); 
+    if (choice < 0 || choice >= dungeon_count) {
+        printf("Invalid.\n");
+        return;
+    }
+
+    int choosed_dungeon = dungeon_i[choice];
+    struct Dungeon *dungeon = &system_data->dungeons[choosed_dungeon];
+
+    int hunter_stats = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
+    int dungeon_stats = dungeon->atk + dungeon->hp + dungeon->def;
+    printf("Battle: %s (Stats: %d) vs %s (Stats: %d)\n",
+           cur_hunter->username, hunter_stats, dungeon->name, dungeon_stats);
+
+    if (hunter_stats > dungeon_stats) {
+        // kalo si hunter win
+        cur_hunter->exp += dungeon->exp;
+        cur_hunter->atk += dungeon->atk / 2; // Hanya setengah ATK sebagai reward
+        cur_hunter->hp += dungeon->hp / 2;   // Hanya setengah HP sebagai reward
+        cur_hunter->def += dungeon->def / 2; // Hanya setengah DEF sebagai reward
+        int dungeon_shmid = shmget(dungeon->shm_key, sizeof(struct Dungeon), 0666);
+        shmctl(dungeon_shmid, IPC_RMID, NULL);
+
+        // Geser array dungeons untuk menghapus dungeon yang dipilih
+        for (int i = choosed_dungeon; i < system_data->num_dungeons - 1; i++) {
+            system_data->dungeons[i] = system_data->dungeons[i + 1];
+        }
+        system_data->num_dungeons--;
+
+        // Perbarui shared memory hunter
+        int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
+        struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+        *hunter_shm = *cur_hunter;
+        shmdt(hunter_shm);
+
+        printf("Raid success! You defeated %s and gained rewards: EXP+%d, ATK+%d, HP+%d, DEF+%d\n",
+               dungeon->name, dungeon->exp, dungeon->atk / 2, dungeon->hp / 2, dungeon->def / 2);
+    } else {
+        // Hunter kalah
+        int damage = dungeon->atk;
+        cur_hunter->hp -= damage;
+        printf("Raid failed! You took %d damage from %s. HP remaining: %d\n",
+               damage, dungeon->name, cur_hunter->hp);
+
+        // Perbarui shared memory hunter
+        int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
+        struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+        *hunter_shm = *cur_hunter;
+        shmdt(hunter_shm);
+
+        if (cur_hunter->hp <= 0) {
+            printf("You have been defeated and removed from the system.\n");
+            shmctl(hunter_shmid, IPC_RMID, NULL);
+            for (int i = 0; i < system_data->num_hunters; i++) {
+                if (strcmp(system_data->hunters[i].username, cur_hunter->username) == 0) {
+                    for (int j = i; j < system_data->num_hunters - 1; j++) {
+                        system_data->hunters[j] = system_data->hunters[j + 1];
+                    }
+                    system_data->num_hunters--;
+                    break;
+                }
+            }
+            shmdt(cur_hunter);
+            shmdt(system_data);
+            exit(0);
+        }
+    }
+}
+
 void toggle_notif() {
     if (notification_running) {
         notification_running = 0;
@@ -221,25 +336,25 @@ void hunter_menu() {
         printf("5. Exit\n");
         printf("Choice: ");
         scanf("%d", &choice);
-        getchar(); // Clear newline from input buffer
+        getchar(); 
         if (choice == 1) {
             if (cur_hunter->banned) {
                 printf("You are banned from raiding.\n");
             } else {
-                display_available_dungeons();
+                display_ur_dungeons(NULL, 0);
             }
         } else if (choice == 2) {
             if (cur_hunter->banned) {
                 printf("You are banned from raiding.\n");
             } else {
-                raid_dungeon();
+                raid();
             }
         } else if (choice == 3) {
             printf("Enter opponent username: ");
             scanf("%s", opponent);
-            battle_hunter(opponent);
+            battle(opponent);
         } else if (choice == 4) {
-            toggle_notifications();
+            toggle_notif();
         } else if (choice == 5) {
             shmdt(cur_hunter);
             shmdt(system_data);
@@ -281,4 +396,5 @@ int main() {
         }
     }
     return 0;
+}
 }
