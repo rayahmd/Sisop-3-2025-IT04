@@ -157,7 +157,7 @@ int login_hunter(char *username) {
     return 0;
 }
 
-int display_ur_dungeons(int *dungeon_i, int mode) {
+int display_ur_dungeons(struct Hunter *cur_hunter, int *dungeon_i, int mode) {
     printf("=== Available Dungeons for Hunter %s level: %d ===\n", cur_hunter->username, cur_hunter->level);
     printf("------------------------------------------------\n");
     printf("| No | Name          | Min Lv | EXP  | ATK | HP  | DEF |\n");
@@ -166,16 +166,22 @@ int display_ur_dungeons(int *dungeon_i, int mode) {
     for (int i = 0; i < system_data->num_dungeons; i++) {
         struct Dungeon *d = &system_data->dungeons[i];
         if (d->min_level <= cur_hunter->level) {
-            printf("Name: %s, Min Level: %d, EXP: %d, ATK: %d, HP: %d, DEF: %d\n",
-                   d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
-                   dungeon_i[count] = i;
-                    count++; printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
-                        count, d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
-                 if (mode == 1) { 
-                     dungeon_i[count] = i;
-                 }
-                 count++;
+            // Safety check for d->name
+            if (d->name[0] == '\0') {
+                printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
+                       count + 1, "(Unnamed)", d->min_level, d->exp, d->atk, d->hp, d->def);
+            } else {
+                printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
+                       count + 1, d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
+            }
+            if (mode == 1 && dungeon_i != NULL) {
+                dungeon_i[count] = i;
+            }
+            count++;
         }
+    }
+    if (count == 0) {
+        printf("|                No dungeons available right now                  |\n");
     }
     printf("------------------------------------------------\n");
     return count;
@@ -237,19 +243,19 @@ void raid(){
         return;
     }
     int dungeon_i[MAX_DUNGEONS];
-    int dungeon_count = display_ur_dungeons(dungeon_i, 1);
+    int dungeon_count = display_ur_dungeons(cur_hunter, dungeon_i, 1);
     if(dungeon_count == 0){ printf("No dungeons available right now!"); return;}
     
     int choice;
-    printf("Enter dungeon number (0-%d): ", dungeon_count - 1);
+    printf("Enter dungeon number (1-%d): ", dungeon_count);
     scanf("%d", &choice);
     getchar(); 
-    if (choice < 0 || choice >= dungeon_count) {
+    if (choice < 0 || choice > dungeon_count) {
         printf("Invalid.\n");
         return;
     }
 
-    int choosed_dungeon = dungeon_i[choice];
+    int choosed_dungeon = dungeon_i[choice - 1];
     struct Dungeon *dungeon = &system_data->dungeons[choosed_dungeon];
 
     int hunter_stats = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
@@ -266,7 +272,6 @@ void raid(){
         int dungeon_shmid = shmget(dungeon->shm_key, sizeof(struct Dungeon), 0666);
         shmctl(dungeon_shmid, IPC_RMID, NULL);
 
-        // Geser array dungeons untuk menghapus dungeon yang dipilih
         for (int i = choosed_dungeon; i < system_data->num_dungeons - 1; i++) {
             system_data->dungeons[i] = system_data->dungeons[i + 1];
         }
@@ -281,13 +286,13 @@ void raid(){
         printf("Raid success! You defeated %s and gained rewards: EXP+%d, ATK+%d, HP+%d, DEF+%d\n",
                dungeon->name, dungeon->exp, dungeon->atk / 2, dungeon->hp / 2, dungeon->def / 2);
     } else {
-        // Hunter kalah
+        // kalo hunter kalah
         int damage = dungeon->atk;
         cur_hunter->hp -= damage;
         printf("Raid failed! You took %d damage from %s. HP remaining: %d\n",
                damage, dungeon->name, cur_hunter->hp);
 
-        // Perbarui shared memory hunter
+        // perbarui shared memory hunter
         int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
         struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
         *hunter_shm = *cur_hunter;
@@ -341,7 +346,7 @@ void hunter_menu() {
             if (cur_hunter->banned) {
                 printf("You are banned from raiding.\n");
             } else {
-                display_ur_dungeons(NULL, 0);
+                display_ur_dungeons(cur_hunter, NULL, 0);
             }
         } else if (choice == 2) {
             if (cur_hunter->banned) {
