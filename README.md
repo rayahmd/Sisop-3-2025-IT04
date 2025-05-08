@@ -42,6 +42,107 @@ Berikut ini struktur dari repositori praktikum modul 3:
 ```
 
 ## Soal 1
+#### a. Download file secret.zip dan unzip ke client/secrets
+```
+wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=15mnXpYUimVP1F5Df7qd_Ahbjor3o1cVw' -O secrets.zip
+mkdir -p client/secrets
+unzip secrets.zip -d client/secrets
+```
+Command di atas mendownload file secrets.zip menggunakan wget lalu membuat folder client/secrets dan mengunzip secrets.zip ke folder tersebut.
+
+#### b. image_client harus bisa jalan di background dengan daemon
+```
+void daemonize(){
+    pid_t pid = fork();
+    
+    if(pid < 0)
+        exit(EXIT_FAILURE);
+    if(pid > 0)
+        exit(EXIT_SUCCESS);
+
+    setsid();
+    chdir("/");
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    openlog("image_server", LOG_PID, LOG_DAEMON);
+}
+```
+Fungsi daemonize() mengubah program menjadi daemon, yaitu proses latar belakang yang berjalan tanpa terhubung ke terminal. Pertama, fork() digunakan untuk membuat proses anak; proses induk keluar agar hanya anak yang lanjut. Kemudian setsid() membuat sesi baru agar proses tidak lagi terikat terminal. chdir("/") memindahkan direktori kerja ke root untuk menghindari mengunci direktori aktif. Selanjutnya, input/output standar (stdin, stdout, stderr) ditutup agar daemon tidak terhubung ke terminal. Terakhir, openlog() digunakan untuk mencatat log dengan identifikasi "image_server" ke sistem log Linux.
+
+#### c. image_client.c terhubung ke image_server untuk reverse text lalu decode from hex untuk disimpan dalam database server dengan nama file timestamp dan juga request download dari database.
+```
+void upload_text(int sock) {
+    char filename[256], buffer[BUFFER_SIZE];
+    printf("Masukkan nama file teks (contoh: input_1.txt): ");
+    scanf("%s", filename);
+    char filepath[512];
+    snprintf(filepath, 512, "client/secrets/%s", filename);
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        printf("ERROR: File tidak ditemukan\n");
+        return;
+    }
+    fseek(file, 0, SEEK_END);
+    long fsize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char *content = malloc(fsize + 1);
+    fread(content, 1, fsize, file);
+    fclose(file);
+    content[fsize] = '\0';
+    snprintf(buffer, BUFFER_SIZE, "UPLOAD_TEXT %s %s", filename, content);
+    write(sock, buffer, strlen(buffer));
+    int n = read(sock, buffer, BUFFER_SIZE - 1);
+    if (n > 0) {
+        buffer[n] = '\0';
+        printf("%s\n", buffer);
+    }
+    free(content);
+}
+```
+Fungsi `upload_text()` meminta pengguna memasukkan nama file teks, lalu mencoba membuka file tersebut dari folder `client/secrets/`. Jika file ditemukan, isinya dibaca sepenuhnya ke memori, kemudian dikemas menjadi pesan dengan format `"UPLOAD_TEXT <nama_file> <isi_file>"` dan dikirim ke server melalui socket. Setelah itu, client menunggu respon dari server dan menampilkannya ke layar. Akhirnya, memori yang digunakan untuk membaca isi file dibebaskan.
+```
+void download_jpeg(int sock) {
+    char filename[256], buffer[BUFFER_SIZE];
+    printf("Masukkan nama file JPEG (contoh: 1744403652.jpeg): ");
+    scanf("%s", filename);
+    snprintf(buffer, BUFFER_SIZE, "DOWNLOAD_JPEG %s", filename);
+    write(sock, buffer, strlen(buffer));
+    char filepath[512];
+    snprintf(filepath, 512, "client/%s", filename);
+    FILE *file = fopen(filepath, "wb");
+    int n = read(sock, buffer, BUFFER_SIZE);
+    if (n > 0) {
+        if (strncmp(buffer, "ERROR", 5) == 0) {
+            printf("%s\n", buffer);
+        } else {
+            fwrite(buffer, 1, n, file);
+            printf("Sukses mengunduh %s\n", filename);
+        }
+    }
+    fclose(file);
+}
+```
+Fungsi `download_jpeg()` meminta pengguna memasukkan nama file JPEG yang ingin diunduh, lalu mengirim permintaan `"DOWNLOAD_JPEG <nama_file>"` ke server melalui socket. Setelah itu, client menyiapkan file output di folder `client/` dan menunggu data dari server. Jika data yang diterima diawali dengan `"ERROR"`, pesan kesalahan ditampilkan; jika tidak, data dianggap sebagai isi file JPEG dan ditulis ke file lokal. Setelah selesai, file ditutup.
+#### e. Program dapat dijalankan dengan memasukkan perintah berkali-kali
+````
+int main() {
+    int choice;
+    while (1) {
+        display_menu();
+        scanf("%d", &choice);
+        if (choice == 3) break;
+        int sock = connect_to_server();
+        if (sock < 0) continue;
+        if (choice == 1) upload_text(sock);
+        else if (choice == 2) download_jpeg(sock);
+        close(sock);
+    }
+    return 0;
+}
+````
+Menggunakan while true di function main sehingga program client bisa berjalan berkali-kali.
 
 ## Soal 2
 
