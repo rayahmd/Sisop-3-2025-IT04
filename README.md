@@ -1189,3 +1189,453 @@ if (equip_weapon(...) == 0) {
 Saat beli senjata, dicek apakah uang cukup dan ID valid. Saat equip senjata, dicek apakah ID sesuai dengan inventory.
 
 ## Soal 4
+
+
+### > Penjelasan
+#### a. Buat file system.c sebagai server dan hunter.c sebagai client
+```
+key_t key = ftok("/tmp", 'S');
+int shmid = shmget(key, sizeof(SystemData),
+                  IPC_CREAT | IPC_EXCL | 0666);
+SystemData *sys = shmat(shmid, NULL, 0);
+sys->num_hunters = 0;
+sys->num_dungeons = 0;
+sys->current_notification_index = 0;
+
+```
+Cuplikan code di atas merupakan code dari system.c yang membuat main shared memory. `ftok("/tmp", 'S');` menghasilkan unique key untuk shared memory utama. shmget() digunakan untuk membuat shared memory utama yang digunakan oleh sistem untuk menyimpan status seperti jumlah hunter, dungeon, dan lainnya. 
+
+```
+key_t key = ftok("/tmp", 'S');
+int shmid = shmget(key, sizeof(SystemData), 0666);
+SystemData *sys = shmat(shmid, NULL, 0);
+```
+Hunter.c mengakses shared memory utama yang telah dibuat oleh system menggunakan key 'S'.  Penggunaan shmget() untuk menghubungkan ke shared memory tersebut.
+```
+hunter->shm_key = ftok("/tmp/hunter_system", 1000 + sys->num_hunters);
+int h_shmid = shmget(hunter->shm_key, sizeof(Hunter),
+                    IPC_CREAT | 0666);
+Hunter *hmem = shmat(h_shmid, NULL, 0);
+*hmem = *hunter;
+```
+Code di atas di line `ftok("/tmp/hunter_system", 1000 + sys->num_hunters)` menghasilkan shared memory untuk setiap hunter yang didaftarkan. 
+
+##### b. Buat fitur register yang membuat unique key setiap hunter dan stat awal (Level=1, EXP=0, ATK=10, HP=100, DEF=5) dan login pada file hunter.c. Data hunter yang disimpan mempunyai shared memory sendiri yang terhubung dengan sistem.
+
+```
+
+void register_hunter(char *username) {
+    FILE *fp = fopen("/tmp/hunter_system", "a");
+    if (fp == NULL) {
+        perror("fopen /tmp/hunter_system");
+        return;
+    }
+    fclose(fp);
+
+    key_t key = get_system_key();
+    shmid = shmget(key, sizeof(struct SystemData), 0666);
+    if (shmid == -1) {
+        perror("shmget");
+        exit(1);
+    }
+    system_data = (struct SystemData *)shmat(shmid, NULL, 0);
+    if (system_data->num_hunters >= MAX_HUNTERS) {
+        printf("Max hunters reached. Can't register again:(\n");
+        return;
+    }
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        if (strcmp(system_data->hunters[i].username, username) == 0) {
+            printf("Username already exists.\n");
+            return;
+        }
+    }
+    struct Hunter *hunter = &system_data->hunters[system_data->num_hunters];
+    strcpy(hunter->username, username);
+    hunter->level = 1;
+    hunter->exp = 0;
+    hunter->atk = 10;
+    hunter->hp = 100;
+    hunter->def = 5;
+    hunter->banned = 0;
+    hunter->shm_key = ftok("/tmp/hunter_system", 1000 + system_data->num_hunters);
+    if (hunter->shm_key == -1) {
+        perror("ftok");
+        shmdt(system_data);
+        return;
+    }
+
+    int hunter_shmid = shmget(hunter->shm_key, sizeof(struct Hunter), IPC_CREAT | 0666);
+    if (hunter_shmid == -1) {
+        perror("shmget hunter");
+        return;
+    }
+
+    struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+    if (hunter_shm == (void *)-1) {
+        perror("shmat hunter");
+        shmctl(hunter_shmid, IPC_RMID, NULL);
+        shmdt(system_data);
+        return;
+    }
+    *hunter_shm = *hunter;
+    shmdt(hunter_shm);
+    system_data->num_hunters++;
+    printf("Hunter %s registered.\n", username);
+    shmdt(system_data);
+}
+```
+Pada function di atas pada line `fopen("/tmp/hunter_system", "a");` digunakan untuk mengecek apakah ada file /tmp/hunter_system agar ftok bisa membuat unique key untuk setiap hunter. Selanjutnya, mengakses system key yang sama dengan system.c untuk mengakses memory segment yang berisi array hunters.
+
+```
+struct Hunter *h = &system_data->hunters[num_hunters];  
+strcpy(h->username, username);  
+h->level = 1; h->exp = 0; h->atk = 10; h->hp = 100; h->def = 5;  
+h->banned = 0;
+
+```
+Pada cuplikan di sini untuk mengisi data hunter baru ke shared memory utama dan mengisi stats sesuai permintaan soal.
+
+```
+h->shm_key = ftok("/tmp/hunter_system", 1000 + num_hunters);  
+hunter_shmid = shmget(h->shm_key, sizeof(Hunter), IPC_CREAT | 0666);
+```
+Membuat shared memory per hunter sehingga bisa di-attach dan detach secara terpisah. 
+#### c. Display stats hunter untuk system.c yang menampilkan nama, level, exp, atk, hp, def, dan status banned atau tidak.
+```
+void display_hunters() {
+    printf("Registered Hunters:\n");
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        struct Hunter *h = &system_data->hunters[i];
+        printf("Username: %s, Level: %d, EXP: %d, ATK: %d, HP: %d, DEF: %d, Banned: %s\n",
+               h->username, h->level, h->exp, h->atk, h->hp, h->def, h->banned ? "Yes" : "No");
+    }
+}
+```
+Function di atas melakukan looping sesuai dengan hunters yang telah terdaftar pada shared memory. Dari situ akan menampilkan semua hunter yang ada beserta stats yang mereka miliki.
+#### d. Buatlah dungeon dengan random stats seperti level, atk, hp, def, exp sesuai dengan kriteria yang sudah ditetapkan. Dungeon yang di-generate akan disimpan dalam shared memory sendiri yang berbeda dan dapat diakses oleh hunters.
+```
+void create_dungeon() {
+    if (system_data->num_dungeons >= MAX_DUNGEONS) {
+        printf("Max dungeons reached. Can't create more dungeons...\n");
+        return;
+    }
+    struct Dungeon *dungeon = &system_data->dungeons[system_data->num_dungeons];
+    sprintf(dungeon->name, "Dungeon-%d", system_data->num_dungeons + 1);
+    dungeon->min_level = rand() % 5 + 1;
+    dungeon->exp = rand() % 151 + 150;
+    dungeon->atk = rand() % 51 + 100;
+    dungeon->hp = rand() % 51 + 50;
+    dungeon->def = rand() % 26 + 25;
+    dungeon->shm_key = ftok("/tmp", system_data->num_dungeons + 'D');
+    int dungeon_shmid = shmget(dungeon->shm_key, sizeof(struct Dungeon), IPC_CREAT | 0666);
+    if (dungeon_shmid == -1) {
+        perror("shmget dungeon");
+        return;
+    }
+    struct Dungeon *dungeon_shm = (struct Dungeon *)shmat(dungeon_shmid, NULL, 0);
+    *dungeon_shm = *dungeon;
+    shmdt(dungeon_shm);
+    system_data->num_dungeons++;
+    printf("Dungeon %s created.\n", dungeon->name);
+}
+```
+
+Pada awalnya function di atas akan mengecek apakah dungeon sudah melebihi max dungeons atau belum. Lalu jika masih belum melebihi, akan mendapatkan pointer ke `system_data->dungeons[num_dungeons]` yaitu array untuk diisi dungeon. Selanjutnya akan diinisiasi atribut seperti nama, level, stas lainnya yang akan diisi secara random. Selanjutnya key akan digenerate di shared memory. shmget() akan dipanggil untuk membuat segment baru dan shmat untuk attach ke segment tersebut kemudian shmdt() dipanggil untuk melepaskan attachment tadi. Selanjutnya, akan mengkonfirmasi dungeon created untuk menandai dungeon sukses dibuat.
+
+
+#### e. Buatlah fitur menampilkan dungeons yang telah terbuat pada system.c
+
+```
+void display_dungeons() {
+    printf("Available Dungeons:\n");
+    for (int i = 0; i < system_data->num_dungeons; i++) {
+        struct Dungeon *d = &system_data->dungeons[i];
+        printf("Name: %s, Min Level: %d, EXP: %d, ATK: %d, HP: %d, DEF: %d, Key: %d\n",
+               d->name, d->min_level, d->exp, d->atk, d->hp, d->def, d->shm_key);
+    }
+}
+```
+Function di atas digunakan untuk menampilkan dungeon yang telah tergenerate. Pada awalnya akan memulai loop pada shared memory untuk looping seluruh dungeon, lalu akan menampilkan seluruh dungeon beserta statsnya.
+
+#### f. Menampilkan dungeon berdasarkan level hunter
+
+```
+int display_ur_dungeons(struct Hunter *cur_hunter, int *dungeon_i, int mode) {
+    printf("=== Available Dungeons for Hunter %s level: %d ===\n", cur_hunter->username, cur_hunter->level);
+    printf("------------------------------------------------\n");
+    printf("| No | Name          | Min Lv | EXP  | ATK | HP  | DEF |\n");
+    printf("------------------------------------------------\n");
+    int count = 0;
+    for (int i = 0; i < system_data->num_dungeons; i++) {
+        struct Dungeon *d = &system_data->dungeons[i];
+        if (d->min_level <= cur_hunter->level) {
+            if (d->name[0] == '\0') {
+                printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
+                       count + 1, "(Unnamed)", d->min_level, d->exp, d->atk, d->hp, d->def);
+            } else {
+                printf("| %2d | %-13s | %6d | %4d | %3d | %3d | %3d |\n",
+                       count + 1, d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
+            }
+            if (mode == 1 && dungeon_i != NULL) {
+                dungeon_i[count] = i;
+            }
+            count++;
+        }
+    }
+    if (count == 0) {
+        printf("|                No dungeons available right now                  |\n");
+    }
+    printf("------------------------------------------------\n");
+    return count;
+}
+```
+Sama seperti display_dungeons hanya saja terdapat perkondisian di line ` if (d->min_level <= cur_hunter->level)` yang menampilkan dungeon berdasarkan level hunter atau di bawahnya.
+
+#### g. Buatlah sistem raid dungeon yang ketika hunter berhasil mengalahkan dungeon akan mendapat reward exp dan bisa naik level apabila exp hunter mencapai 500 exp.
+
+```
+void raid(){
+    if(cur_hunter->banned){
+        printf("You're still banned from raiding... \n");
+        return;
+    }
+    int dungeon_i[MAX_DUNGEONS];
+    int dungeon_count = display_ur_dungeons(cur_hunter, dungeon_i, 1);
+    if(dungeon_count == 0){ printf("No dungeons available right now!"); return;}
+    
+    int choice;
+    printf("Enter dungeon number (1-%d): ", dungeon_count);
+    scanf("%d", &choice);
+    getchar(); 
+    if (choice < 0 || choice > dungeon_count) {
+        printf("Invalid.\n");
+        return;
+    }
+
+    int choosed_dungeon = dungeon_i[choice - 1];
+    struct Dungeon *dungeon = &system_data->dungeons[choosed_dungeon];
+
+    int hunter_stats = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
+    int dungeon_stats = dungeon->atk + dungeon->hp + dungeon->def;
+    printf("Battle: %s (Stats: %d) vs %s (Stats: %d)\n",
+           cur_hunter->username, hunter_stats, dungeon->name, dungeon_stats);
+
+    if (hunter_stats > dungeon_stats) {
+        // kalo si hunter win
+        cur_hunter->exp += dungeon->exp;
+        cur_hunter->atk += dungeon->atk / 2; 
+        cur_hunter->hp += dungeon->hp / 2;   
+        cur_hunter->def += dungeon->def / 2; 
+        int dungeon_shmid = shmget(dungeon->shm_key, sizeof(struct Dungeon), 0666);
+        shmctl(dungeon_shmid, IPC_RMID, NULL);
+
+        for (int i = choosed_dungeon; i < system_data->num_dungeons - 1; i++) {
+            system_data->dungeons[i] = system_data->dungeons[i + 1];
+        }
+        system_data->num_dungeons--;
+
+        int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
+        struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+        *hunter_shm = *cur_hunter;
+        shmdt(hunter_shm);
+
+        printf("Raid success! You defeated %s and gained rewards: EXP+%d, ATK+%d, HP+%d, DEF+%d\n",
+               dungeon->name, dungeon->exp, dungeon->atk / 2, dungeon->hp / 2, dungeon->def / 2);
+    } else {
+        // kalo hunter kalah
+        int damage = dungeon->atk;
+        cur_hunter->hp -= damage;
+        printf("Raid failed! You took %d damage from %s. HP remaining: %d\n",
+               damage, dungeon->name, cur_hunter->hp);
+
+
+        int hunter_shmid = shmget(cur_hunter->shm_key, sizeof(struct Hunter), 0666);
+        struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+        *hunter_shm = *cur_hunter;
+        shmdt(hunter_shm);
+
+        if (cur_hunter->hp <= 0) {
+            printf("You have been defeated and removed from the system.\n");
+            shmctl(hunter_shmid, IPC_RMID, NULL);
+            for (int i = 0; i < system_data->num_hunters; i++) {
+                if (strcmp(system_data->hunters[i].username, cur_hunter->username) == 0) {
+                    for (int j = i; j < system_data->num_hunters - 1; j++) {
+                        system_data->hunters[j] = system_data->hunters[j + 1];
+                    }
+                    system_data->num_hunters--;
+                    break;
+                }
+            }
+            shmdt(cur_hunter);
+            shmdt(system_data);
+            exit(0);
+        }
+    }
+}
+
+```
+
+Pada awalnya akan mengecek status banned hunter yang mana hunter tidak akan bisa raid apabila status bannednya yes. Jika bisa raid akan menampilkan dungeon dan mempersilahkan hunter untuk memilih dungeon yang ingin diraid. Terdapat kondisi apabila hunter menang akan mendapat reward exp, jika kalah akan terhapus dari system dengan shmctl().
+
+#### h. Buatlah fitur battle untuk pertarungan antar hunter yang mengadu total stats. Jika hunter menang stats hunter yang kalah akan ditambahkan ke statsnya.
+
+```
+
+void battle(char *opponent_username) {
+    if (cur_hunter->banned) {
+        printf("You are banned.\n");
+        return;
+    }
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        if (strcmp(system_data->hunters[i].username, opponent_username) == 0) {
+            struct Hunter *opponent = &system_data->hunters[i];
+            if (opponent->banned) {
+                printf("Opponent is banned.\n");
+                return;
+            }
+            int ur_total = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
+            int opp_total = opponent->atk + opponent->hp + opponent->def;
+            printf("Your stats: ATK=%d, HP=%d, DEF=%d, Total=%d\n", cur_hunter->atk, cur_hunter->hp, cur_hunter->def, ur_total);
+            printf("Opponent stats: ATK=%d, HP=%d, DEF=%d, Total=%d\n", opponent->atk, opponent->hp, opponent->def, opp_total);
+            int my_stats = cur_hunter->atk + cur_hunter->hp + cur_hunter->def;
+            int opp_stats = opponent->atk + opponent->hp + opponent->def;
+            if (my_stats > opp_stats) {
+                cur_hunter->atk += opponent->atk;
+                cur_hunter->hp += opponent->hp;
+                cur_hunter->def += opponent->def;
+                int opp_shmid = shmget(opponent->shm_key, sizeof(struct Hunter), 0666);
+                shmctl(opp_shmid, IPC_RMID, NULL);
+                for (int j = i; j < system_data->num_hunters - 1; j++) {
+                    system_data->hunters[j] = system_data->hunters[j + 1];
+                }
+                system_data->num_hunters--;
+                printf("You defeated %s!\n", opponent_username);
+            } else {
+                opponent->atk += cur_hunter->atk;
+                opponent->hp += cur_hunter->hp;
+                opponent->def += cur_hunter->def;
+                shmctl(hunter_shmid, IPC_RMID, NULL);
+                for (int j = 0; j < system_data->num_hunters; j++) {
+                    if (strcmp(system_data->hunters[j].username, cur_hunter->username) == 0) {
+                        for (int k = j; k < system_data->num_hunters - 1; k++) {
+                            system_data->hunters[k] = system_data->hunters[k + 1];
+                        }
+                        system_data->num_hunters--;
+                        break;
+                    }
+                }
+                printf("You were defeated by %s!\n", opponent_username);
+                shmdt(cur_hunter);
+                shmdt(system_data);
+                exit(0);
+            }
+            return;
+        }
+    }
+    printf("Opponent %s not found.\n", opponent_username);
+}
+```
+Function di atas merupakan fitur battle yang membandingkan total stats antar hunter. Terdapat perkondisian berdasarkan kondisi total stats hunter. Apabila hunter yang melawan menang, akan mendapat reward yaitu exp dan stats lawan. Apabila hunter kalah, lawan akan mengambil statsnya dan hunter yang melawan akan terhapus dari system dengan shmdt().
+
+#### i. Buat fitur banned serta unbannednya. Jika dibanned tidak akan bisa raid dan battle.
+```
+void ban_hunter(char *username) {
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        if (strcmp(system_data->hunters[i].username, username) == 0) {
+            system_data->hunters[i].banned = 1;
+            printf("Hunter %s banned.\n", username);
+            return;
+        }
+    }
+    printf("Hunter %s not found.\n", username);
+}
+
+void unban_hunter(char *username) {
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        if (strcmp(system_data->hunters[i].username, username) == 0) {
+            system_data->hunters[i].banned = 0;
+            printf("Hunter %s succesfuly unbanned.\n", username);
+            return;
+        }
+    }
+    printf("Hunter %s not found.\n", username);
+}
+
+```
+Pada dua function di atas merupakan fitur banned dan unbanned, cara kerjanya adalah akan melakukan looping untuk mencari username hunter yang akan dibanned atau unbanned. Apabila username sudah ditemukan akan mengubah kondisi banned yang awalnya 0 menjadi 1, akan terjadi sebaliknya pada unbanned.
+
+#### j. Buatlah fitur untuk reset stats hunter ke default.
+```
+void reset(char *username) {
+    for (int i = 0; i < system_data->num_hunters; i++) {
+        if (strcmp(system_data->hunters[i].username, username) == 0) {
+            struct Hunter *h = &system_data->hunters[i];
+            h->level = 1;
+            h->exp = 0;
+            h->atk = 10;
+            h->hp = 100;
+            h->def = 5;
+            int hunter_shmid = shmget(h->shm_key, sizeof(struct Hunter), 0666);
+            struct Hunter *hunter_shm = (struct Hunter *)shmat(hunter_shmid, NULL, 0);
+            *hunter_shm = *h;
+            shmdt(hunter_shm);
+            printf("Hunter %s stats reset.\n", username);
+            return;
+        }
+    }
+    printf("Hunter %s not found.\n", username);
+}
+```
+Pada function reset akan looping untuk menemukan hunter yang akan direset berdasarkan usernamenya. Apabila sudah ditemukan, stats akan diset lagi sesuai dengan default stats yang sudah ditentukan.
+
+#### k. Fitur notifikasi dungeon sesuai dengan level hunter yang menampilkan dungeon setiap 3 detik.
+
+
+```
+void toggle_notif() {
+    if (notification_running) {
+        notification_running = 0;
+        pthread_join(notification_thread, NULL);
+        printf("Notifications stopped.\n");
+    } else {
+        notification_running = 1;
+        pthread_create(&notification_thread, NULL, notification_loop, NULL);
+        printf("Notifications started.\n");
+    }
+}
+```
+Function di atas digunakan untuk menghidupkan dan mematikan notifikasi berdasarkan permintaan hunter.
+
+```
+void *notification_loop(void *arg) {
+    while (notification_running) {
+        system("clear");
+        printf("Dungeon Notifications for %s:\n", cur_hunter->username);
+        if (system_data->num_dungeons == 0) {
+            printf("No dungeons available.\n");
+        } else {
+            int index = system_data->current_notification_index % system_data->num_dungeons;
+            struct Dungeon *d = &system_data->dungeons[index];
+            if (d->min_level <= cur_hunter->level) {
+                printf("Name: %s, Min Level: %d, EXP: %d, ATK: %d, HP: %d, DEF: %d\n",
+                       d->name, d->min_level, d->exp, d->atk, d->hp, d->def);
+            }
+            system_data->current_notification_index++;
+        }
+        sleep(3);
+    }
+    return NULL;
+}
+```
+function ini menerima parameter dari toggle notif, apabila notification_running = 1 akan membersihkan layar dengan system("clear") dan menampilkan dungeon yang cocok dengan level user berurutan berdasarkan index dungeon sambil menunggu 3 detik sebelum menampilkan dungeon selanjutnya.
+
+#### L. Cleanup shared memory setiap system dimatikan
+```
+void cleanup(int signum) {
+    shmctl(shmid, IPC_RMID, NULL);
+    printf("Shared memory cleaned up.\n");
+    exit(0);
+}
+
+```
+Function menggunakan shmctl untuk menghapus shared memory dan exit untuk mengakhiri program. 
