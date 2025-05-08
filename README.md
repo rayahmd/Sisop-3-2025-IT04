@@ -55,6 +55,35 @@ Anda tidak tahu bagaimana anda dapat berada di situasi ini, tetapi didorong oleh
 **a. Entering the dungeon**
 **dungeon.c** akan bekerja sebagai **server** yang dimana **client** (player.c) dapat terhubung melalui RPC. dungeon.c akan **memproses** segala perintah yang dikirim oleh player.c. **Lebih dari 1 client** dapat mengakses **server**.
 
+**b. Sightseeing** 
+Anda melihat disekitar dungeon dan menemukan beberapa hal yang menarik seperti toko senjata dan pintu dengan aura yang cukup seram. Ketika player.c dijalankan, ia akan terhubung ke **dungeon.c** dan menampilkan sebuah **main menu** seperti yang dicontohkan di bawah ini (tidak harus mirip, dikreasikan sesuai kreatifitas masing-masing praktikan). 
+
+**c. Status Check** 
+Melihat bahwa terdapat sebuah toko senjata, anda mengecek status diri anda dengan harapan anda masih memiliki sisa uang untuk membeli senjata. Jika opsi **Show Player Stats** dipilih, maka program akan menunjukan Uang yang dimiliki (Jumlah dibebaskan), **senjata** yang sedang digunakan, **Base Damage**, dan **jumlah musuh** yang telah **dimusnahkan**.  
+
+**d. Weapon Shop** 
+Ternyata anda memiliki sisa uang dan langsung pergi ke toko senjata tersebut untuk membeli senjata. Terdapat **5 pilihan senjata** di toko tersebut dan beberapa dari mereka memiliki **_passive_** yang unik. Disaat opsi **_Shop_** dipilih, program akan menunjukan senjata apa saja yang dapat dibeli beserta **harga**, **damage**, dan juga **passive** (jika ada). **List senjata** yang ada dan dapat dibeli beserta **logic/command** untuk **membeli** senjata tersebut diletakan di code **shop.c/shop.h** yang nanti akan dipakai oleh **dungeon.c**. 
+**Notes**: praktikan **_dibebaskan_** untuk **penamaan**, **harga**, **damage**, dan juga **passive** dari senjata-senjata yang ada. Yang penting harus terdapat **5 atau lebih** senjata dengan minimal **2 senjata** yang memiliki **passive**. 
+
+**e. Handy Inventory** 
+Setelah membeli senjata di toko tadi, anda membuka ransel anda untuk memakai senjata tersebut. Jika opsi **_View Inventory_** dipilih, program akan menunjukan senjata apa saja yang dimiliki dan dapat dipakai (jika senjata memiliki passive, tunjukan juga passive tersebut). 
+Lalu apabila opsi **_Show Player Stats_** dipilih saat menggunakan weapon maka **Base Damage** player akan berubah dan jika memiliki **passive**, maka akan ada status tambahan yaitu **Passive**. 
+
+**f. Enemy Encounter** 
+Anda sekarang sudah siap untuk melewati pintu yang seram tadi, disaat anda memasuki pintu tersebut, anda langsung ditemui oleh sebuah musuh yang bukan sebuah manusia. Dengan tekad yang bulat, anda melawan musuh tersebut. Saat opsi **_Battle Mode_** dipilih, program akan menunjukan **health-bar** musuh serta angka yang menunjukan berapa darah musuh tersebut dan menunggu **input** dengan opsi **attack** untuk melakukan sebuah serangan dan juga **exit** untuk keluar dari **Battle Mode**. Apabila darah musuh berkurang, maka **health-bar** musuh akan berkurang juga. 
+Jika darah musuh sudah 0, maka program akan menunjukan **rewards** berupa berapa banyak **gold** yang didapatkan lalu akan **muncul musuh** lagi. 
+
+**g. Other Battle Logic**
+**- Health & Rewards** 
+Untuk darah musuh, seberapa banyak darah yang mereka punya dibuat secara **random**, contoh: **50-200 HP**. Lakukan hal yang sama untuk **rewards**.  
+**- Damage Equation** 
+Untuk **damage**, gunakan **base damage** sebagai kerangka awal dan tambahkan **rumus damage** apapun (dibebaskan, yang pasti perlu **random number** agar hasil damage bervariasi). Lalu buatlah logic agar setiap serangan memiliki kesempatan untuk **Critical** yang membuat **damage** anda 2x lebih besar. 
+**- Passive** 
+Jika senjata yang dipakai memiliki **Passive** setiap kali passive tersebut menyala, maka tunjukan bahwa **passive** tersebut aktif. 
+
+**h. Error Handling**
+Berikan **error handling** untuk opsi-opsi yang tidak ada.
+
 ### > Penyelesaian
 #### dungeon.c
 ```
