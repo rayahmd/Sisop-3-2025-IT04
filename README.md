@@ -1225,7 +1225,7 @@ Saat beli senjata, dicek apakah uang cukup dan ID valid. Saat equip senjata, dic
 ![image](https://github.com/user-attachments/assets/abeda644-f117-4d38-adbf-bfbf2a81ce9e)
 ![image](https://github.com/user-attachments/assets/9414b5a7-5a99-4695-a188-60dc49db33de)
 ![image](https://github.com/user-attachments/assets/859fd885-1faf-4771-995a-e785fb5d7624)
-![image](https://github.com/user-attachments/assets/270f998c-ace3-4603-9798-1a8775350b73)
+![image](https://github.com/user-attachments/assets/a2558465-66de-4499-8c1e-22233e1c0137)
 ![image](https://github.com/user-attachments/assets/bf2bd897-b943-49cc-add5-6508d297b174)
 ![image](https://github.com/user-attachments/assets/16d77209-86d0-42f2-ab63-8bf4617c0732)
 ![image](https://github.com/user-attachments/assets/292366f2-a28c-4b85-868b-265dfe65e965)
