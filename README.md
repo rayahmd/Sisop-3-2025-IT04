@@ -2451,3 +2451,23 @@ void cleanup(int signum) {
 
 ```
 Function menggunakan shmctl untuk menghapus shared memory dan exit untuk mengakhiri program. 
+
+[REVISI]
+1. Fix bug banned dan unbanned yang hanya mengubah status yes no saja tetapi hunter yang terbanned masih bisa raid dan battle.
+2. Fix raid hanya dengan mebandingkan level hunter dengan dungeon.
+
+Dokumentasi:
+![image](https://github.com/user-attachments/assets/3fed7ad1-7927-431a-bb1a-41c29ce39c86)  
+Banned hunter tidak bisa akses raid dan battle.  
+
+![image](https://github.com/user-attachments/assets/bbb3a2e4-6dc6-4e8d-b369-986621f6b527)  
+Display hunter yang terdaftar.
+
+![image](https://github.com/user-attachments/assets/7c3e3c76-c488-4f5c-a38d-93a340543bf7)  
+Display dungeons.
+
+![image](https://github.com/user-attachments/assets/de917d34-08c8-4d67-b88f-907feb22004f)
+Display dungeons according to hunter level.
+
+
+
