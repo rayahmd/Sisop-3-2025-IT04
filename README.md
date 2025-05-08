@@ -1217,6 +1217,19 @@ if (equip_weapon(...) == 0) {
 ```
 Saat beli senjata, dicek apakah uang cukup dan ID valid. Saat equip senjata, dicek apakah ID sesuai dengan inventory.
 
+### > Dokumentasi
+![image](https://github.com/user-attachments/assets/9289468c-6b98-46ba-ab79-60549f98056a)
+![image](https://github.com/user-attachments/assets/b21e25a4-983a-4e36-a1e5-f2cf27b3785a)
+![image](https://github.com/user-attachments/assets/9a51b4ed-a6a9-451b-a4f7-e4df47e081f4)
+![image](https://github.com/user-attachments/assets/a4569761-b0cc-467b-b788-58fc6e7b78e3)
+![image](https://github.com/user-attachments/assets/abeda644-f117-4d38-adbf-bfbf2a81ce9e)
+![image](https://github.com/user-attachments/assets/9414b5a7-5a99-4695-a188-60dc49db33de)
+![image](https://github.com/user-attachments/assets/859fd885-1faf-4771-995a-e785fb5d7624)
+![image](https://github.com/user-attachments/assets/270f998c-ace3-4603-9798-1a8775350b73)
+![image](https://github.com/user-attachments/assets/bf2bd897-b943-49cc-add5-6508d297b174)
+![image](https://github.com/user-attachments/assets/a6afe979-8283-48fb-9190-bfc2986afd20)
+![image](https://github.com/user-attachments/assets/292366f2-a28c-4b85-868b-265dfe65e965)
+
 ## Soal 4
 
 
