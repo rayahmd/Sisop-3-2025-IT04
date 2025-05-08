@@ -145,6 +145,675 @@ int main() {
 Menggunakan while true di function main sehingga program client bisa berjalan berkali-kali.
 
 ## Soal 2
+ Tahun 2025, di tengah era perdagangan serba cepat, berdirilah sebuah perusahaan ekspedisi baru bernama RushGo. RushGo ingin memberikan layanan ekspedisi terbaik dengan 2 pilihan, Express (super cepat) dan Reguler (standar). Namun, pesanan yang masuk sangat banyak! Mereka butuh sebuah sistem otomatisasi pengiriman, agar agen-agen mereka tidak kewalahan menangani pesanan yang terus berdatangan. Kamu ditantang untuk membangun Delivery Management System untuk RushGo 😆(Author: Nayla / naylaarr)
+
+Sistem ini terdiri dari dua bagian utama:
+- delivery_agent.c untuk agen otomatis pengantar Express
+- dispatcher.c untuk pengiriman dan monitoring pesanan oleh user
+
+#### A. Mengunduh File Order dan Menyimpannya ke Shared Memory
+
+Untuk memulai, Anda perlu mengelola semua orderan yang masuk dengan menggunakan shared memory.
+Unduh file delivery_order.csv
+Setelah file CSV diunduh, program Anda harus membaca seluruh data dari CSV dan menyimpannya ke dalam shared memory.
+
+#### B. Pengiriman Bertipe Express
+RushGo memiliki tiga agen pengiriman utama: AGENT A, AGENT B, dan AGENT C.
+Setiap agen dijalankan sebagai thread terpisah.
+Agen-agen ini akan secara otomatis:
+Mencari order bertipe Express yang belum dikirim.
+Mengambil dan mengirimkannya tanpa intervensi user.
+Setelah sukses mengantar, program harus mencatat log di delivery.log dengan format:
+
+[dd/mm/yyyy hh:mm:ss] [AGENT A/B/C] Express package delivered to [Nama] in [Alamat]
+
+
+#### C. Pengiriman Bertipe Reguler
+Berbeda dengan Express, untuk order bertipe Reguler, pengiriman dilakukan secara manual oleh user.
+- User dapat mengirim permintaan untuk mengantar order Reguler dengan memberikan perintah deliver dari dispatcher. 
+Penggunaan:
+`./dispatcher -deliver [Nama] `
+- Pengiriman dilakukan oleh agent baru yang namanya adalah nama user.
+- Setelah sukses mengantar, program harus mencatat log di delivery.log dengan format:
+`[dd/mm/yyyy hh:mm:ss] [AGENT <user>] Reguler package delivered to [Nama] in [Alamat] `
+
+
+#### D. Mengecek Status Pesanan
+Dispatcher juga harus bisa mengecek status setiap pesanan.
+Penggunaan:
+`./dispatcher -status [Nama]`
+
+Contoh:
+`Status for Valin: Delivered by Agent C
+Status for Novi: Pending`
+
+
+#### E. Melihat Daftar Semua Pesanan
+Untuk memudahkan monitoring, program dispatcher bisa menjalankan perintah list untuk melihat semua order disertai nama dan statusnya.
+Penggunaan:
+./dispatcher -list
+
+### JAWAB
+
+- #### KODE DISPATCHER.C
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <semaphore.h>
+
+#define SHARED_MEM_NAME "/delivery_order"
+#define MAX_ORDERS 100
+
+typedef struct {
+    char nama[50];
+    char alamat[100];
+    char jenis[10];
+    int delivered;
+    char agent[20];
+} Order;
+
+Order *orders;
+int total_orders = 0;
+sem_t *sem;
+
+void log_delivery(const char *agent, const char *nama, const char *alamat) {
+    FILE *log_file = fopen("delivery.log", "a");
+    if (!log_file) {
+        perror("Error opening log file");
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(log_file, "[%02d/%02d/%04d %02d:%02d:%02d] [%s] Reguler package delivered to %s in %s\n",
+            t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+            t->tm_hour, t->tm_min, t->tm_sec,
+            agent, nama, alamat);
+    fclose(log_file);
+}
+
+void dispatcher_deliver(const char *nama) {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        if (strcmp(orders[i].nama, nama) == 0 && strcmp(orders[i].jenis, "Reguler") == 0 && orders[i].delivered == 0) {
+            orders[i].delivered = 1;
+            log_delivery("Dinda", orders[i].nama, orders[i].alamat);
+            strcpy(orders[i].agent, "Dinda");
+            sem_post(sem);
+            return;
+        }
+    }
+    sem_post(sem);
+    printf("Order not found or already delivered\n");
+}
+
+void dispatcher_status(const char *nama) {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        if (strcmp(orders[i].nama, nama) == 0) {
+            printf("Status for %s: %s\n", nama, orders[i].agent);
+            sem_post(sem);
+            return;
+        }
+    }
+    sem_post(sem);
+    printf("Order not found\n");
+}
+
+void dispatcher_list() {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        printf("%s - %s\n", orders[i].nama, orders[i].agent);
+    }
+    sem_post(sem);
+}
+
+int main(int argc, char *argv[]) {
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Error opening shared memory in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+    ftruncate(shm_fd, sizeof(Order) * MAX_ORDERS);
+
+    orders = mmap(0, sizeof(Order) * MAX_ORDERS, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (orders == MAP_FAILED) {
+        perror("Error mapping shared memory in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    sem = sem_open("/delivery_order", O_CREAT, 0666, 0); 
+    if (sem == SEM_FAILED) {
+        perror("Error opening semaphore in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *file = fopen("delivery_order.csv", "r");
+    if (!file) {
+        perror("Error opening CSV file in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[256];
+    total_orders = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (total_orders >= MAX_ORDERS) break;
+        sscanf(line, "%49[^,],%99[^,],%9s",
+               orders[total_orders].nama,
+               orders[total_orders].alamat,
+               orders[total_orders].jenis);
+        orders[total_orders].delivered = 0;
+        strcpy(orders[total_orders].agent, "Pending");
+        total_orders++;
+    }
+    fclose(file);
+
+    sem_post(sem); 
+
+    if (argc == 2 && strcmp(argv[1], "-list") == 0) {
+        dispatcher_list();
+    } else if (argc == 3 && strcmp(argv[1], "-status") == 0) {
+        dispatcher_status(argv[2]);
+    } else if (argc == 3 && strcmp(argv[1], "-deliver") == 0) {
+        dispatcher_deliver(argv[2]);
+    } else {
+        printf("Invalid command\n");
+    }
+
+    munmap(orders, sizeof(Order) * MAX_ORDERS);
+    close(shm_fd);
+    sem_close(sem);
+    return 0;
+}
+```
+#### > Penjelasan
+```
+`typedef struct {
+    char nama[50];
+    char alamat[100];
+    char jenis[10];
+    int delivered;
+    char agent[20];
+} Order;
+```
+
+Membuat struktur Order yang merepresentasikan informasi setiap pesanan.
+
+`nama`: Nama penerima pesanan.
+
+`alamat`: Alamat tujuan pesanan.
+
+`jenis`: Jenis pesanan, seperti "Reguler".
+
+`delivered`: Status pesanan (0 = belum terkirim, 1 = terkirim).
+
+`agent`: Nama agen yang mengantarkan pesanan.
+
+
+```
+void log_delivery(const char *agent, const char *nama, const char *alamat) {
+    FILE *log_file = fopen("delivery.log", "a");
+    if (!log_file) {
+        perror("Error opening log file");
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(log_file, "[%02d/%02d/%04d %02d:%02d:%02d] [%s] Reguler package delivered to %s in %s\n",
+            t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+            t->tm_hour, t->tm_min, t->tm_sec,
+            agent, nama, alamat);
+    fclose(log_file);
+}
+```
+- Membuka file `delivery.log` dalam mode append (a) untuk menambahkan log baru.
+- Mencatat waktu saat ini menggunakan `time()` dan `localtime()`.
+- Menulis log pengiriman ke file dengan format waktu, nama agen, nama penerima, dan alamat.
+
+Fungsi dispatcher_deliver
+```
+void dispatcher_deliver(const char *nama) {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        if (strcmp(orders[i].nama, nama) == 0 && strcmp(orders[i].jenis, "Reguler") == 0 && orders[i].delivered == 0) {
+            orders[i].delivered = 1;
+            log_delivery("Dinda", orders[i].nama, orders[i].alamat);
+            strcpy(orders[i].agent, "Dinda");
+            sem_post(sem);
+            return;
+        }
+    }
+    sem_post(sem);
+    printf("Order not found or already delivered\n");
+}
+```
+Fungsi untuk menandai pesanan sebagai sudah dikirim.
+
+`sem_wait(sem)`: Mengunci semaphore agar tidak ada proses lain yang mengakses shared memory.
+
+Mencari pesanan dengan nama sesuai nama, jenis `Reguler`, dan belum dikirim `(delivered == 0)`.
+
+Tandai pesanan sudah terkirim `(delivered = 1)`.
+
+Tambahkan log pengiriman menggunakan `log_delivery`.
+
+Set nama agen menjadi "Dinda".`
+
+Tampilkan pesan "Order not found or already delivered". Jika tidak ditemukan.
+
+`sem_post(sem)`: Membuka kembali semaphore.
+
+Fungsi dispatcher_status
+
+```
+void dispatcher_status(const char *nama) {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        if (strcmp(orders[i].nama, nama) == 0) {
+            printf("Status for %s: %s\n", nama, orders[i].agent);
+            sem_post(sem);
+            return;
+        }
+    }
+    sem_post(sem);
+    printf("Order not found\n");
+}
+```
+
+untuk Menampilkan nama agen yang menangani pesanan.
+
+Langkah-langkah:
+
+- Kunci semaphore.
+
+- Cari pesanan dengan nama sesuai nama.
+
+- Jika ditemukan, tampilkan status agen.
+
+- Jika tidak ditemukan, tampilkan pesan "Order not found".
+
+- Membuka semaphore.
+
+Fungsi dispatcher_list
+```
+void dispatcher_list() {
+    sem_wait(sem);
+    for (int i = 0; i < total_orders; i++) {
+        printf("%s - %s\n", orders[i].nama, orders[i].agent);
+    }
+    sem_post(sem);
+}
+```
+Untuk Menampilkan semua pesanan beserta nama agen yang menangani.
+
+Langkah-langkah:
+
+- Kunci semaphore.
+
+- Iterasi semua pesanan di shared memory.
+
+- Tampilkan nama penerima dan agen.
+
+- Buka semaphore.
+
+Fungsi main
+```
+int main(int argc, char *argv[]) {
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Error opening shared memory in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+    ftruncate(shm_fd, sizeof(Order) * MAX_ORDERS);
+
+    orders = mmap(0, sizeof(Order) * MAX_ORDERS, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (orders == MAP_FAILED) {
+        perror("Error mapping shared memory in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    sem = sem_open("/delivery_order", O_CREAT, 0666, 0); 
+    if (sem == SEM_FAILED) {
+        perror("Error opening semaphore in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *file = fopen("delivery_order.csv", "r");
+    if (!file) {
+        perror("Error opening CSV file in dispatcher");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[256];
+    total_orders = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (total_orders >= MAX_ORDERS) break;
+        sscanf(line, "%49[^,],%99[^,],%9s",
+               orders[total_orders].nama,
+               orders[total_orders].alamat,
+               orders[total_orders].jenis);
+        orders[total_orders].delivered = 0;
+        strcpy(orders[total_orders].agent, "Pending");
+        total_orders++;
+    }
+    fclose(file);
+
+    sem_post(sem); 
+
+    if (argc == 2 && strcmp(argv[1], "-list") == 0) {
+        dispatcher_list();
+    } else if (argc == 3 && strcmp(argv[1], "-status") == 0) {
+        dispatcher_status(argv[2]);
+    } else if (argc == 3 && strcmp(argv[1], "-deliver") == 0) {
+        dispatcher_deliver(argv[2]);
+    } else {
+        printf("Invalid command\n");
+    }
+
+    munmap(orders, sizeof(Order) * MAX_ORDERS);
+    close(shm_fd);
+    sem_close(sem);
+    return 0;
+}
+```
+- akan membuka shared memory dan semaphore.
+
+- lalu memuat data pesanan dari file CSV.
+
+- lalu menangani perintah -list, -status, dan -deliver.
+
+- terakhir kode ini akn membersihkan resource saat selesai.
+
+- #### KODE DELIVERY_AGENT.C
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <semaphore.h>
+
+#define SHARED_MEM_NAME "/delivery_order"
+#define MAX_ORDERS 100
+
+typedef struct {
+    char nama[50];
+    char alamat[100];
+    char jenis[10];
+    int delivered;
+    char agent[20];
+} Order;
+
+Order *orders;
+int total_orders;
+sem_t *sem;
+
+void log_delivery(const char *agent, const char *nama, const char *alamat) {
+    FILE *log_file = fopen("delivery.log", "a");
+    if (!log_file) {
+        perror("Error opening log file");
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(log_file, "[%02d/%02d/%04d %02d:%02d:%02d] [%s] Express package delivered to %s in %s \n",
+            t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+            t->tm_hour, t->tm_min, t->tm_sec,
+            agent, nama, alamat);
+    fclose(log_file);
+}
+
+void *express_agent(void *arg) {
+    char *agent_name = (char *)arg;
+
+    while (1) {
+        sem_wait(sem);
+        for (int i = 0; i < total_orders; i++) {
+            if (strcmp(orders[i].jenis, "Express") == 0 && orders[i].delivered == 0) {
+                orders[i].delivered = 1;
+                strcpy(orders[i].agent, agent_name);
+                log_delivery(agent_name, orders[i].nama, orders[i].alamat);
+                break;
+            }
+        }
+        sem_post(sem);
+        sleep(1);
+    }
+
+    return NULL;
+}
+
+int main() {
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Error opening shared memory in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    orders = mmap(0, sizeof(Order) * MAX_ORDERS, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (orders == MAP_FAILED) {
+        perror("Error mapping shared memory in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    sem = sem_open("/delivery_order", 0);
+    if (sem == SEM_FAILED) {
+        perror("Error opening semaphore in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    sem_wait(sem); 
+    total_orders = 0;
+    while (orders[total_orders].nama[0] != '\0' && total_orders < MAX_ORDERS) {
+        total_orders++;
+    }
+    sem_post(sem);
+
+    pthread_t agent_a, agent_b, agent_c;
+    pthread_create(&agent_a, NULL, express_agent, "AGENT A");
+    pthread_create(&agent_b, NULL, express_agent, "AGENT B");
+    pthread_create(&agent_c, NULL, express_agent, "AGENT C");
+
+    pthread_join(agent_a, NULL);
+    pthread_join(agent_b, NULL);
+    pthread_join(agent_c, NULL);
+
+    munmap(orders, sizeof(Order) * MAX_ORDERS);
+    close(shm_fd);
+    sem_close(sem);
+    shm_unlink(SHARED_MEM_NAME); 
+    sem_unlink("/delivery_order"); 
+    return 0;
+}
+```
+
+Fungsi `log_delivery`
+```
+void log_delivery(const char *agent, const char *nama, const char *alamat) {
+    FILE *log_file = fopen("delivery.log", "a");
+    if (!log_file) {
+        perror("Error opening log file");
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(log_file, "[%02d/%02d/%04d %02d:%02d:%02d] [%s] Express package delivered to %s in %s \n",
+            t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+            t->tm_hour, t->tm_min, t->tm_sec,
+            agent, nama, alamat);
+    fclose(log_file);
+}
+```
+Untuk mencatat log pengiriman paket ke file delivery.log.
+
+- Pertama, akan membuka file log dalam mode append (a).
+
+- lalu, Mencatat waktu saat ini menggunakan time() dan localtime().
+
+- Menulis log dengan format: waktu, nama agen, nama penerima, dan alamat.
+
+- Menutup file setelah selesai.
+
+Fungsi `express_agent`
+```
+void *express_agent(void *arg) {
+    char *agent_name = (char *)arg;
+
+    while (1) {
+        sem_wait(sem);
+        for (int i = 0; i < total_orders; i++) {
+            if (strcmp(orders[i].jenis, "Express") == 0 && orders[i].delivered == 0) {
+                orders[i].delivered = 1;
+                strcpy(orders[i].agent, agent_name);
+                log_delivery(agent_name, orders[i].nama, orders[i].alamat);
+                break;
+            }
+        }
+        sem_post(sem);
+        sleep(1);
+    }
+
+    return NULL;
+}
+```
+
+Fungsi thread untuk agen pengiriman yang menangani pesanan "Express".
+
+Langkah-langkah:
+
+- Parameter: Menerima nama agen sebagai argumen (arg).
+
+Loop Tak Berhenti:
+
+- Mengunci semaphore (sem_wait(sem)) untuk mengakses shared memory.
+
+Iterasi melalui semua pesanan:
+
+- Jika pesanan jenis "Express" ditemukan dan belum terkirim (delivered == 0):
+
+- Tandai sebagai terkirim (delivered = 1).
+
+- Set nama agen pada pesanan (agent_name).
+
+- Tambahkan log pengiriman menggunakan log_delivery.
+
+- Keluar dari loop.
+
+- Membuka semaphore (sem_post(sem)).
+
+- Beristirahat selama 1 detik (sleep(1)) sebelum melanjutkan.
+
+Thread terus berjalan tanpa batas kecuali dihentikan secara manual.
+
+Fungsi main
+```
+int main() {
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Error opening shared memory in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    orders = mmap(0, sizeof(Order) * MAX_ORDERS, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (orders == MAP_FAILED) {
+        perror("Error mapping shared memory in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    sem = sem_open("/delivery_order", 0);
+    if (sem == SEM_FAILED) {
+        perror("Error opening semaphore in delivery_agent");
+        exit(EXIT_FAILURE);
+    }
+
+    sem_wait(sem); 
+    total_orders = 0;
+    while (orders[total_orders].nama[0] != '\0' && total_orders < MAX_ORDERS) {
+        total_orders++;
+    }
+    sem_post(sem);
+```
+Membuka Shared Memory:
+
+- Membuka shared memory dengan nama `SHARED_MEM_NAME`.
+
+- Jika gagal, program menampilkan pesan error dan keluar.
+
+Mapping Shared Memory:
+
+- Shared memory dimapping ke pointer orders untuk akses data.
+
+- Jika gagal, program menampilkan pesan error dan keluar.
+
+Membuka Semaphore:
+
+- Semaphore dengan nama `/delivery_order` dibuka untuk sinkronisasi antar-thread.
+
+- Jika gagal, program menampilkan pesan error dan keluar.
+
+Menghitung Total Pesanan:
+
+- Mengunci semaphore `(sem_wait(sem))` untuk akses eksklusif.
+
+- Menghitung jumlah pesanan dalam shared memory berdasarkan data yang tidak kosong.
+
+- Membuka semaphore `(sem_post(sem))`.
+
+Membuat Thread Agen
+```
+    pthread_t agent_a, agent_b, agent_c;
+    pthread_create(&agent_a, NULL, express_agent, "AGENT A");
+    pthread_create(&agent_b, NULL, express_agent, "AGENT B");
+    pthread_create(&agent_c, NULL, express_agent, "AGENT C");
+
+    pthread_join(agent_a, NULL);
+    pthread_join(agent_b, NULL);
+    pthread_join(agent_c, NULL);
+```
+Membuat tiga thread, masing-masing menjalankan fungsi express_agent dengan nama agen:
+
+"AGENT A", "AGENT B", dan "AGENT C".
+
+`pthread_create`: Membuat thread baru.
+
+`pthread_join`: Menunggu thread selesai (tidak akan pernah selesai kecuali program dihentikan).
+
+```
+    munmap(orders, sizeof(Order) * MAX_ORDERS);
+    close(shm_fd);
+    sem_close(sem);
+    shm_unlink(SHARED_MEM_NAME); 
+    sem_unlink("/delivery_order"); 
+    return 0;
+```
+Membersihkan resource:
+
+- munmap: Melepaskan mapping shared memory.
+
+- close: Menutup file descriptor shared memory.
+
+- sem_close: Menutup semaphore.
+
+- shm_unlink: Menghapus shared memory dari sistem.
+
+- sem_unlink: Menghapus semaphore dari sistem.
+
+#### Dokumentasi
+![image](https://github.com/user-attachments/assets/4e0fe076-1b03-40ff-a284-4ca8a5fb4eb9)
+![image](https://github.com/user-attachments/assets/3a50974f-43ba-4e79-99ee-6da3a4db0261)
+![image](https://github.com/user-attachments/assets/c18269bc-25cd-4bea-9e8a-073b2d2f39c1)
+![image](https://github.com/user-attachments/assets/0fa9da19-c3a6-4f83-ba54-a0fdb98910ef)
 
 ## Soal 3 - **The Lost Dungeon**
 Suatu pagi, anda menemukan jalan setapak yang ditumbuhi lumut dan hampir tertutup semak. Rasa penasaran membawamu mengikuti jalur itu, hingga akhirnya anda melihatnya: sebuah kastil tua, tertutup akar dan hampir runtuh, tersembunyi di tengah hutan. Gerbangnya terbuka seolah memanggilmu masuk.
